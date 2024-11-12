@@ -17,23 +17,16 @@ class Client:
         print(f"Client {self.client_id} connected to server on port {self.server_port}")
         threading.Thread(target=self.listen_for_updates).start()
 
-    #sends a write request to the server
     def write(self, key, value):
+        # Sends a write request to the server
         self.socket.send(f"write {key} {value}".encode())
         print(f"Client {self.client_id} requested write for {key} with value '{value}'")
 
-    # sends a read request to the server
     def read(self, key):
+        # Sends a read request to the server
         self.socket.send(f"read {key}".encode())
         response = self.socket.recv(1024).decode()
         print(f"Client {self.client_id} read response: '{response}'")
-    
-    #Sends connect command with ports to the server
-    def connect_server_to_others(self, ports):
-        command = f"connect {' '.join(ports)}"
-        self.socket.send(command.encode())
-        response = self.socket.recv(1024).decode()
-        print(f"Server response: {response}")
 
     def listen_for_updates(self):
         while True:
@@ -56,9 +49,8 @@ if __name__ == "__main__":
     client = Client(server_host, server_port, client_id)
     client.connect_to_server()
 
-    #gets input from user for read/write
     while True:
-        command = input("\nEnter command 'write key_value message', 'read key_value', or 'connect port1,port2,...': ")
+        command = input("\nEnter command 'write key_value message' or 'read key_value': ")
         cmd_parts = command.split()
         if len(cmd_parts) >= 2:
             cmd = cmd_parts[0]
@@ -68,10 +60,7 @@ if __name__ == "__main__":
                 client.write(key, value)
             elif cmd == "read":
                 client.read(key)
-            elif cmd == "connect":
-                ports = key.split(',') #ports of other server to connect to
-                client.connect_server_to_others(ports)
             else:
-                print("Invalid command. Please try again.")
+                print("Invalid command")
         else:
-            print("Invalid command format.")
+            print("Invalid command") 

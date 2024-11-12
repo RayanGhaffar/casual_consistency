@@ -1,95 +1,108 @@
 # run as py Server.py 
+# enter other servers as a space separated list
 
 import socket
 import threading
 import time
 
 class Server:
-    def __init__(self, host, port, server_id):
+    def __init__(self, host, port, server_id, other_servers=[]):
         self.host = host
         self.port = port
         self.server_id = server_id
         self.data_store = {}  # main data store for the server
         self.dependencies = {}  
         self.connections = []  # store client connections
-        self.server_sockets = []# store sockets to other servers
+        self.other_servers = other_servers  # list of other server addresses
 
-    #starts server by binding a socket and allowing for threading
     def start_server(self):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.bind((self.host, self.port))
         server_socket.listen(5)
         print(f"Server {self.server_id} listening on port {self.port}")
         
-        # start listening for client connections
+        # Start listening for client connections
         threading.Thread(target=self.listen_for_clients, args=(server_socket,)).start()
 
-    #allows the server to listen for clients to connect to it
+        # Connect to other servers and start listening for server updates
+        self.connect_to_other_servers()
+
     def listen_for_clients(self, server_socket):
         while True:
             client_socket, addr = server_socket.accept()
-            self.connections.append(client_socket)
-            print(f"Client connected from {addr}")
-            threading.Thread(target=self.handle_client, args=(client_socket,)).start()
+            print(f"Connection received from {addr}")
+            
+            # Read identifier message from the connecting socket
+            identifier_message = client_socket.recv(1024).decode()
+            identifier = identifier_message.split()[0]
+            
+            if identifier == "server":
+                # This is another server, register it as a peer
+                intended_port = identifier_message.split()[1]
+                port= int(intended_port)
+                self.register_peer('127.0.0.1', port)  # Register the connecting server
+                threading.Thread(target=self.handle_server_updates, args=(client_socket,)).start()
+            else:
+                # This is a client, add to client connections
+                self.connections.append(client_socket)
+                print(f"Client connected from {addr}")
+                threading.Thread(target=self.handle_client, args=(client_socket,)).start()
 
-    #allows for other servers to connect to it
-    def connect_to_server(self, other_host, other_port):
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((other_host, other_port))
-            self.server_sockets.append(s)
-            print(f"Connected to server at {other_host}:{other_port}")
-            threading.Thread(target=self.handle_server_updates, args=(s,)).start()
-        except ConnectionRefusedError:
-            print(f"Connection to server at {other_host}:{other_port} failed")
+    #handles incoming peer registration requests.
+    def register_peer(self, host, port):
+       
+        if (host, port) not in self.other_servers:
+            self.other_servers.append((host, port))
+            print(f"registered new server {host}:{port}")
+        print(f"Connected Servers: {self.other_servers}")
 
-    # based on the user's input, will either read, write, or connect to another server
+    #connects a server to another server
+    def connect_to_other_servers(self):
+        self.server_sockets = []
+        for server in self.other_servers:
+            host, port = server
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.connect((host, port))
+                self.server_sockets.append(s)
+                print(f"Connected to server at {host}:{port}")
+                
+                # Send both the identifier and the intended port
+                s.send(f"server {self.port}".encode())  # Include this server's listening port
+                
+                threading.Thread(target=self.handle_server_updates, args=(s,)).start()
+            except ConnectionRefusedError:
+                print(f"Connection to server at {host}:{port} failed")
+
+    #when an update from another server is received, decode and break up the message, then determine order by timestamp
+    def handle_server_updates(self, server_socket):
+        while True:
+            data = server_socket.recv(1024).decode()
+            if data.startswith("register"):
+                _, host, port = data.split()
+                self.register_peer(host, int(port))
+            elif data.startswith("replicate"):
+                # existing replication handling code...
+                parts = data.split(" ", 3)
+                cmd, key, value, version = parts
+                version = tuple(map(int, version.strip("()").split(",")))
+                self.receive_replicated_update(key, value, version)
+            print(f"inside handle server updates Connected Servers: {self.other_servers}")
+
+    # Handle read or write requests from the client
     def handle_client(self, client_socket):
         while True:
             data = client_socket.recv(1024).decode()
             if not data:
                 break
-            command_parts = data.split()
-            cmd = command_parts[0]
-            
+            cmd, key = data.split()[0], data.split()[1]
             if cmd == "write":
-                key = command_parts[1]
-                value = command_parts[2]
+                value = data.split()[2]
                 self.write_to_store(key, value, client_socket)
             elif cmd == "read":
-                key = command_parts[1]
                 self.send_value_to_client(key, client_socket)
-            elif cmd == "connect":
-                ports = command_parts[1:]
-                self.connect_to_other_servers_by_ports(ports, client_socket)
 
-    def connect_to_other_servers_by_ports(self, ports, client_socket):
-        response = ""
-        for port in ports:
-            try:
-                # Connect to each server on localhost using the specified port
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.connect(('localhost', int(port)))
-                self.server_sockets.append(s)
-                response += f"Connected to server on port {port}\n"
-                print(f"Server {self.server_id} connected to server on port {port}")
-            except ConnectionRefusedError:
-                response += f"Failed to connect to server on port {port}\n"
-                print(f"Connection to server on port {port} failed")
-
-        # Send the connection results back to the client
-        print('going back to client side: ', response)
-        client_socket.send(response.encode())
-
-    def handle_server_updates(self, server_socket):
-        while True:
-            data = server_socket.recv(1024).decode()
-            if data.startswith("replicate"):
-                parts = data.split(" ", 3)
-                cmd, key, value, version = parts
-                version = tuple(map(int, version.strip("()").split(",")))
-                self.receive_replicated_update(key, value, version)
-
+    # send write message to all clients in the server and other servers
     def write_to_store(self, key, value, client_socket):
         timestamp = int(time.time())
         version = (timestamp, self.server_id)
@@ -97,11 +110,14 @@ class Server:
         self.dependencies[key] = version
         print(f"Server {self.server_id} updated {key} with {value} at version {version}")
 
+        # propagate the update to all connected clients 
         for c in self.connections:
             c.send(f"replicate {key} {value} {version}".encode())
+        #propagate update to all other servers so they can send to their clients
         for s in self.server_sockets:
             s.send(f"replicate {key} {value} {version}".encode())
 
+    #sends an update to a specific client
     def send_value_to_client(self, key, client_socket):
         if key in self.data_store:
             value, version = self.data_store[key]
@@ -109,7 +125,9 @@ class Server:
         else:
             client_socket.send(f"error Key {key} not found".encode())
 
+    #Takes the update from another server and if the timestamp is after the previous, add it to the chain, other wise delay it for later
     def receive_replicated_update(self, key, value, version):
+        #check dependencies before applying the update
         if key in self.dependencies and self.dependencies[key] >= version:
             self.data_store[key] = (value, version)
             self.dependencies[key] = version
@@ -118,11 +136,17 @@ class Server:
             print(f"Server {self.server_id} delaying update for {key}")
 
 
-# Start the server
+# starts the server. 
 if __name__ == "__main__":
-    host = 'localhost'  
+    host = '127.0.0.1'  # Hardcoded to localhost
     port = int(input("Server port: "))
     server_id = int(input("Server ID: "))
+    #gets the other servers ports
+    other_servers_input = input("Enter other servers' ports: ").split()
 
-    server = Server(host, port, server_id)
+    # create list of other servers with localhost and their ports
+    other_servers = [(host, int(port)) for port in other_servers_input if port]
+
+    #initialize server object and starts the server
+    server = Server(host, port, server_id, other_servers)
     server.start_server()
