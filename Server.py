@@ -34,23 +34,23 @@ class Server:
             
             # Read identifier message from the connecting socket
             identifier_message = client_socket.recv(1024).decode()
+            #print(f"\n\n{identifier_message}\n\n")
             identifier = identifier_message.split()[0]
             
-            if identifier == "server":
-                # This is another server, register it as a peer
+            if identifier == "server": #connect servers together
                 intended_port = identifier_message.split()[1]
                 port= int(intended_port)
                 self.register_peer('127.0.0.1', port)  # Register the connecting server
                 threading.Thread(target=self.handle_server_updates, args=(client_socket,)).start()
-            else:
-                # This is a client, add to client connections
+            else: #adds a user client to the server and executes commands from user
+                #print("else statement of listen for clients")
+                #maybe an if else to see if client is already in connections list, if not add it, if so handle command
                 self.connections.append(client_socket)
                 print(f"Client connected from {addr}")
-                threading.Thread(target=self.handle_client, args=(client_socket,)).start()
-
-    #handles incoming peer registration requests.
+                threading.Thread(target=self.handle_client, args=(client_socket, identifier_message)).start()
+    
+    #registers servers with each other
     def register_peer(self, host, port):
-       
         if (host, port) not in self.other_servers:
             self.other_servers.append((host, port))
             print(f"registered new server {host}:{port}")
@@ -88,19 +88,27 @@ class Server:
                 version = tuple(map(int, version.strip("()").split(",")))
                 self.receive_replicated_update(key, value, version)
             print(f"inside handle server updates Connected Servers: {self.other_servers}")
+    
+    #takes message from client terminal and allows user commands
+    def handle_client(self, client_socket, initial_message=None):
+        if initial_message:
+            self.process_client_command(client_socket, initial_message)
 
-    # Handle read or write requests from the client
-    def handle_client(self, client_socket):
         while True:
             data = client_socket.recv(1024).decode()
             if not data:
                 break
-            cmd, key = data.split()[0], data.split()[1]
-            if cmd == "write":
-                value = data.split()[2]
-                self.write_to_store(key, value, client_socket)
-            elif cmd == "read":
-                self.send_value_to_client(key, client_socket)
+            self.process_client_command(client_socket, data)
+    #helper function for handle_client to determine what to do with commands
+    def process_client_command(self, client_socket, data):
+        #print(f"\t{data}")
+
+        cmd, key = data.split()[0], data.split()[1]
+        if cmd == "write":
+            value = data.split()[2]
+            self.write_to_store(key, value, client_socket)
+        elif cmd == "read":
+            self.send_value_to_client(key, client_socket)
 
     # send write message to all clients in the server and other servers
     def write_to_store(self, key, value, client_socket):
@@ -111,6 +119,7 @@ class Server:
         print(f"Server {self.server_id} updated {key} with {value} at version {version}")
 
         # propagate the update to all connected clients 
+        #print(f"\tconnections: {self.connections} \t servers: {self.server_sockets}")
         for c in self.connections:
             c.send(f"replicate {key} {value} {version}".encode())
         #propagate update to all other servers so they can send to their clients
@@ -138,7 +147,7 @@ class Server:
 
 # starts the server. 
 if __name__ == "__main__":
-    host = '127.0.0.1'  # Hardcoded to localhost
+    host = '127.0.0.1'  # hardcoded to localhost
     port = int(input("Server port: "))
     server_id = int(input("Server ID: "))
     #gets the other servers ports
