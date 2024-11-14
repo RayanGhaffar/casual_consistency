@@ -153,7 +153,7 @@ class Server:
         the ts is the same stays the same which will cause the inconsistency
         """
         if key == "y" and value =="found" and self.server_id ==3:
-            time.sleep(10) 
+            time.sleep(20) 
 
         #gets the latest time   
         last_key = list(self.dependencies)[-1] if len(self.dependencies) >0 else 0
