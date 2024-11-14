@@ -7,11 +7,12 @@ class Server:
         self.host = host
         self.port = port
         self.server_id = server_id
-        self.data_store = {}  # main data store for the server
-        self.dependencies = {}  
+        self.data_store = {}  # main data store for the server. key: (message, (timestamp, serverID))
+        self.dependencies = {}  # key: (timestamp, serverID)
         self.connections = []  # store client connections
         self.other_servers = other_servers  # list of other server addresses
         self.server_sockets = []  # store sockets for connected servers
+        self.delayed=[] # stores the delayed updates
 
     def start_server(self):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -139,31 +140,50 @@ class Server:
 
     #handles updates from other servers
     def receive_replicated_update(self, key, value, version):
-        #adds key to dependency list if not already there or update if time stamp is older
-        if key not in self.dependencies or (key in self.dependencies and self.dependencies[key] >= version):
+        # generates timestamp for when the server receives this replication, simulates transit delay
+        time.sleep(1.5)
+        ts = int(time.time())
+        version = (ts, version[1])
+        
+        """
+        test case for y found to be received after z glad causing inconsistency
+        if A found, delay sending the update. 
+        Server 3 should get B glad then A found, will output an error about inconsistencies.
+        10 second delay for server 2 user to write "z glad". 
+        the ts is the same stays the same which will cause the inconsistency
+        """
+        if key == "y" and value =="found" and self.server_id ==3:
+            time.sleep(10) 
+
+        #gets the latest time   
+        last_key = list(self.dependencies)[-1] if len(self.dependencies) >0 else 0
+        latest_ts = self.dependencies[last_key][0] if len(self.dependencies) >0 else 0
+
+        #adds data to dictionaries if the timestamp of the new message is larger than the others      
+        if ts >= latest_ts:
+            print(f"Key {key} with timestamp {ts} occurs after {last_key} at timestamp {latest_ts}")
             self.data_store[key] = (value, version)
             self.dependencies[key] = version
             print(f"Server {self.server_id} applied replicated update for {key} {value} {version}'")
             
-            # Send the update to all connected clients
+            # send the update to all connected clients
             #print(f"\tclient connections: {self.connections}")
             for c in self.connections:
                 #print(f"\treplicate {key} {value} {version}")
                 c.send(f"replicate {key} {value} {version}".encode())
-        else:
-            print(f"Server {self.server_id} delaying update for {key}")
+        else: #Timestamps are out of order, delay and add to delayed list. Server 3 should have this run
+            print(f"Server {self.server_id} delaying update for {key} at {ts} as it should occur before {last_key} at {latest_ts}")
+            self.delayed.append((key, value, version))
             
         
-
-
 # instantiate server
 if __name__ == "__main__":
     host = '127.0.0.1' #local host
     port = int(input("Server port: "))
     server_id = int(input("Server ID: "))
     other_servers_input = input("Enter other servers' ports: ").split()
-
     other_servers = [(host, int(port)) for port in other_servers_input if port] # initialize sockets for all servers to conenct to
 
+    #Create object and start server
     server = Server(host, port, server_id, other_servers)
     server.start_server()
