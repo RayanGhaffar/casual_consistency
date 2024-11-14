@@ -1,6 +1,7 @@
 # run as py Client.py 
 
 import socket
+import time
 import threading
 import sys
 
@@ -9,10 +10,10 @@ class Client:
         self.server_host = server_host
         self.server_port = server_port
         self.client_id = client_id
-        self.dependency_list = {}  # Track dependencies
+        self.dependency_list = {}  
 
     def connect_to_server(self):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) 
         self.socket.connect((self.server_host, self.server_port))
         print(f"Client {self.client_id} connected to server on port {self.server_port}")
         threading.Thread(target=self.listen_for_updates).start()
@@ -25,12 +26,14 @@ class Client:
     def read(self, key):
         # Sends a read request to the server
         self.socket.send(f"read {key}".encode())
-        response = self.socket.recv(1024).decode()
-        print(f"Client {self.client_id} read response: '{response}'")
+        #print('\tin read function')
+        #response = self.socket.recv(1024).decode()
+        print(f"Client {self.client_id} read response")
 
     def listen_for_updates(self):
         while True:
             data = self.socket.recv(1024).decode()
+            print(f"data from server: {data}")
             if data.startswith("replicate"):
                 try:
                     parts = data.split(" ", 3)  # Split into 4 parts: "replicate", key, value, version
@@ -40,6 +43,7 @@ class Client:
                     self.dependency_list[key] = version
                 except ValueError as e:
                     print(f"Error processing update message: {e}")
+            #print("\tend of listen_for_updates")
 
 # Start client with command-line arguments
 if __name__ == "__main__":
@@ -50,6 +54,7 @@ if __name__ == "__main__":
     client.connect_to_server()
 
     while True:
+        time.sleep(1)
         command = input("\nEnter command 'write key_value message' or 'read key_value': ")
         cmd_parts = command.split()
         if len(cmd_parts) >= 2:

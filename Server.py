@@ -32,6 +32,7 @@ class Server:
 
             # Determine if connection is from another server or client
             identifier_message = client_socket.recv(1024).decode()
+            #print(f"\tidentifier message: {identifier_message}")
             identifier = identifier_message.split()[0]
             
             if identifier == "server":  # Server connection
@@ -42,15 +43,15 @@ class Server:
                 self.connections.append(client_socket)
                 print(f"Client connected from {addr}")
                 threading.Thread(target=self.handle_client, args=(client_socket, identifier_message)).start()
-
+    # adds peer to lists for sockets and servers to keep ttrack
     def register_peer(self, client_socket, addr, port):
         peer = (addr[0], port)
         if peer not in self.other_servers:
             self.other_servers.append(peer)
-            self.server_sockets.append(client_socket)  # Add the socket to server_sockets
-            print(f"Registered new server {addr[0]}:{port}")
+            self.server_sockets.append(client_socket) 
         print(f"Connected Servers: {self.other_servers}")
 
+    #connects to servers together
     def connect_to_other_servers(self):
         for server in self.other_servers:
             host, port = server
@@ -68,16 +69,18 @@ class Server:
             except ConnectionRefusedError:
                 print(f"Connection to server at {host}:{port} failed")
 
+    #handles messages from server to server
     def handle_server_updates(self, server_socket):
         while True:
             data = server_socket.recv(1024).decode()
-            if data.startswith("register"):
+            #print(f"\tserver data is {data}")
+            if data.startswith("register"): # register servers together
                 _, host, port = data.split()
                 self.register_peer(server_socket, (host, int(port)))
-            elif data.startswith("replicate"):
-                # Handle replication
+            elif data.startswith("replicate"): #replicate data one server to another
+                #print(f"\treplicating to other servers")
                 parts = data.split(" ", 3)
-                cmd, key, value, version = parts
+                _, key, value, version = parts
                 version = tuple(map(int, version.strip("()").split(",")))
                 self.receive_replicated_update(key, value, version)
     
@@ -87,6 +90,7 @@ class Server:
 
         while True:
             data = client_socket.recv(1024).decode()
+            #print(f"\tclient data is {data}")
             if not data:
                 break
             self.process_client_command(client_socket, data)
@@ -106,36 +110,60 @@ class Server:
         self.dependencies[key] = version
         print(f"Server {self.server_id} updated {key} with {value} at version {version}")
 
-        # Propagate the update to all clients and other servers
-        for c in self.connections:
+        # propagate the update to all clients and other servers
+        for c in self.connections: #send to all clients
             c.send(f"replicate {key} {value} {version}".encode())
-        print(f"\t{self.server_sockets} {self.other_servers}")
-        for s in self.server_sockets:
+        #print(f"\t{self.server_sockets} {self.other_servers}")
+        for s in self.server_sockets: #send to all servers
             s.send(f"replicate {key} {value} {version}".encode())
 
+    #responds to a client read command by sending data for a given key
     def send_value_to_client(self, key, client_socket):
+        #print(f"\tkey: {key} client_socket: {client_socket}")
+        print(f"Current Data Store: {self.data_store}")
         if key in self.data_store:
             value, version = self.data_store[key]
-            client_socket.send(f"value {key} {value} {version}".encode())
-        else:
-            client_socket.send(f"error Key {key} not found".encode())
+            #print(f'key in data store. {value} - {version}')
+            try:
+                client_socket.send(f"replicate {key} {value} {version}".encode())
+                #print(f"completed send: replicate {key} {value} {version}")
+                
+            except socket.error as e:
+                print(f"\nSocket error when sending to client: {e}")
 
+            #client_socket.send(f"value {key} {value} {version}".encode())
+        else: 
+            #print('key NOT in data store')
+            client_socket.send(f"error Key {key} not found".encode())
+        
+
+    #handles updates from other servers
     def receive_replicated_update(self, key, value, version):
-        if key in self.dependencies and self.dependencies[key] >= version:
+        #adds key to dependency list if not already there or update if time stamp is older
+        if key not in self.dependencies or (key in self.dependencies and self.dependencies[key] >= version):
             self.data_store[key] = (value, version)
             self.dependencies[key] = version
-            print(f"Server {self.server_id} applied replicated update for {key} with value '{value}'")
+            print(f"Server {self.server_id} applied replicated update for {key} {value} {version}'")
+            
+            # Send the update to all connected clients
+            #print(f"\tclient connections: {self.connections}")
+            for c in self.connections:
+                #print(f"\treplicate {key} {value} {version}")
+                c.send(f"replicate {key} {value} {version}".encode())
         else:
             print(f"Server {self.server_id} delaying update for {key}")
+            
+        
 
-# Run server
+
+# instantiate server
 if __name__ == "__main__":
-    host = '127.0.0.1'
+    host = '127.0.0.1' #local host
     port = int(input("Server port: "))
     server_id = int(input("Server ID: "))
     other_servers_input = input("Enter other servers' ports: ").split()
 
-    other_servers = [(host, int(port)) for port in other_servers_input if port]
+    other_servers = [(host, int(port)) for port in other_servers_input if port] # initialize sockets for all servers to conenct to
 
     server = Server(host, port, server_id, other_servers)
     server.start_server()
