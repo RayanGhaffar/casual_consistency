@@ -10,19 +10,21 @@ class Client:
         self.server_host = server_host
         self.server_port = server_port
         self.client_id = client_id
-        self.dependency_list = {}  
+        self.dependency_list = {} # tracks dependencies 
 
+    #Conenction to server. Threading to allow for listening
     def connect_to_server(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) 
         self.socket.connect((self.server_host, self.server_port))
         print(f"Client {self.client_id} connected to server on port {self.server_port}")
         threading.Thread(target=self.listen_for_updates).start()
 
+    # write a key, value to the server's data store
     def write(self, key, value):
-        # Sends a write request to the server
         self.socket.send(f"write {key} {value}".encode())
         print(f"Client {self.client_id} requested write for {key} with value '{value}'")
 
+    #read a key value from the server's data store
     def read(self, key):
         # Sends a read request to the server
         self.socket.send(f"read {key}".encode())
@@ -30,6 +32,7 @@ class Client:
         #response = self.socket.recv(1024).decode()
         print(f"Client {self.client_id} read response")
 
+    # listen for messages from the server and add message into dependency list
     def listen_for_updates(self):
         while True:
             data = self.socket.recv(1024).decode()
@@ -38,14 +41,14 @@ class Client:
                 try:
                     parts = data.split(" ", 3)  # Split into 4 parts: "replicate", key, value, version
                     cmd, key, value, version = parts
-                    version = tuple(map(int, version.strip("()").split(",")))  # Convert version to tuple
+                    version = tuple(map(int, version.strip("()").split(","))) 
                     print(f"\n\tClient {self.client_id} received update: {key} -> {value} with version {version}")
                     self.dependency_list[key] = version
                 except ValueError as e:
                     print(f"Error processing update message: {e}")
             #print("\tend of listen_for_updates")
 
-# Start client with command-line arguments
+# instantiate client 
 if __name__ == "__main__":
     server_host = 'localhost'
     server_port = int(input("Server Port: "))
@@ -53,8 +56,8 @@ if __name__ == "__main__":
     client = Client(server_host, server_port, client_id)
     client.connect_to_server()
 
-    while True:
-        time.sleep(1)
+    while True: # ask user for read or write commands 
+        time.sleep(1) #1 sec delay to allow for response times 
         command = input("\nEnter command 'write key_value message' or 'read key_value': ")
         cmd_parts = command.split()
         if len(cmd_parts) >= 2:
@@ -66,6 +69,6 @@ if __name__ == "__main__":
             elif cmd == "read":
                 client.read(key)
             else:
-                print("Invalid command")
+                print("invalid command")
         else:
-            print("Invalid command") 
+            print("invalid command") 

@@ -14,18 +14,20 @@ class Server:
         self.server_sockets = []  # store sockets for connected servers
         self.delayed=[] # stores the delayed updates
 
+    #create socket 
     def start_server(self):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.bind((self.host, self.port))
         server_socket.listen(5)
         print(f"Server {self.server_id} listening on port {self.port}")
         
-        # Start listening for client and server connections
+        # start listening for client and server connections
         threading.Thread(target=self.listen_for_clients, args=(server_socket,)).start()
 
-        # Connect to other servers and start listening for server updates
+        #connect to other servers and start listening for server updates
         self.connect_to_other_servers()
 
+    # server listener forclient action 
     def listen_for_clients(self, server_socket):
         while True:
             client_socket, addr = server_socket.accept()
@@ -43,7 +45,8 @@ class Server:
             else:  # Client connection
                 self.connections.append(client_socket)
                 print(f"Client connected from {addr}")
-                threading.Thread(target=self.handle_client, args=(client_socket, identifier_message)).start()
+                threading.Thread(target=self.handle_client, args=(client_socket, identifier_message)).start() #threads to handle clients
+
     # adds peer to lists for sockets and servers to keep ttrack
     def register_peer(self, client_socket, addr, port):
         peer = (addr[0], port)
@@ -57,15 +60,16 @@ class Server:
         for server in self.other_servers:
             host, port = server
             try:
+                #create file descriptor
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect((host, port))
                 self.server_sockets.append(s)
                 print(f"Connected Servers: {self.other_servers}")
                 
-                # Send registration info to the server
+                # send registration info to the server
                 s.send(f"server {self.port}".encode())
                 
-                # Start a thread to handle messages from this connected server
+                # start a thread to handle messages from this connected server
                 threading.Thread(target=self.handle_server_updates, args=(s,)).start()
             except ConnectionRefusedError:
                 print(f"Connection to server at {host}:{port} failed")
@@ -85,6 +89,7 @@ class Server:
                 version = tuple(map(int, version.strip("()").split(",")))
                 self.receive_replicated_update(key, value, version)
     
+    # process user write/read commands
     def handle_client(self, client_socket, initial_message=None):
         if initial_message:
             self.process_client_command(client_socket, initial_message)
@@ -95,7 +100,7 @@ class Server:
             if not data:
                 break
             self.process_client_command(client_socket, data)
-
+    #helper as the initial message is decoded
     def process_client_command(self, client_socket, data):
         cmd, key = data.split()[0], data.split()[1]
         if cmd == "write":
@@ -104,6 +109,7 @@ class Server:
         elif cmd == "read":
             self.send_value_to_client(key, client_socket)
 
+    # when there is a write command, send it to all clients in the server and all other servers to replicate
     def write_to_store(self, key, value, client_socket):
         timestamp = int(time.time())
         version = (timestamp, self.server_id)
@@ -111,7 +117,7 @@ class Server:
         self.dependencies[key] = version
         print(f"Server {self.server_id} updated {key} with {value} at version {version}")
 
-        # propagate the update to all clients and other servers
+        # propagate the update to all clients in this server and other servers
         for c in self.connections: #send to all clients
             c.send(f"replicate {key} {value} {version}".encode())
         #print(f"\t{self.server_sockets} {self.other_servers}")
